@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp"
+    android:viewportWidth="320" android:viewportHeight="180">
+    <path android:fillColor="#0B1421" android:pathData="M0,0 H320 V180 H0 Z" />
+    <path android:fillColor="#122534" android:pathData="M248,0 H320 V180 H248 A90,90 0,0 1,248,0" />
+    <group android:translateX="13" android:translateY="23" android:scaleX="1.25" android:scaleY="1.25">
+        <path android:fillColor="#C8ECFF" android:pathData="M46,32 L66,43 L62,50 L42,39 Z" />
+        <path android:fillColor="#67E8CA" android:pathData="M32,44 L40,44 L40,64 L32,64 Z M43,69 L63,58 L67,65 L47,76 Z" />
+        <path android:fillColor="#67E8CA" android:pathData="M36,24 A9,9 0,1 1,36,42 A9,9 0,1 1,36,24 M74,45 A9,9 0,1 1,74,63 A9,9 0,1 1,74,45" />
+        <path android:fillColor="#C8ECFF" android:pathData="M36,66 A9,9 0,1 1,36,84 A9,9 0,1 1,36,66" />
+    </group>
+    <!-- LUMA wordmark as paths: no dependency on launcher fonts. -->
+    <path android:fillColor="#00000000" android:strokeColor="#E9F0FB"
+        android:strokeWidth="5" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M148,73 V105 H165 M177,73 V96 Q177,105 186,105 Q195,105 195,96 V73 M208,105 V73 L220,92 L232,73 V105 M245,105 L257,73 L269,105 M250,94 H264" />
+</vector>
