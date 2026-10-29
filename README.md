@@ -136,3 +136,11 @@ Las pruebas unitarias cubren identidad/deduplicación de servidores, migración 
 El `.gitignore` excluye cachés Gradle/Kotlin, configuración local del IDE/SDK, compilados, APK/AAB, logs y claves de firma. Se incluyen fuentes, recursos, pruebas y Gradle Wrapper.
 
 No se ha definido una licencia de distribución para el proyecto. Las dependencias conservan sus licencias respectivas; revisar sus condiciones antes de distribuir.
+
+## Verificación de esta importación (29 de octubre de 2026)
+
+- `assembleDebug`: correcto.
+- `testDebugUnitTest`: 15 pruebas, sin fallos ni errores.
+- `lintDebug`: detecta 3 errores y 30 advertencias del código existente; la comprobación no pasa. El primer error es `RestrictedApi` en la sobrescritura de `dispatchKeyEvent` de `MainActivity.kt`. Consultar el informe generado en `app/build/reports/lint-results-debug.html` para el detalle completo.
+
+La compilación y las pruebas unitarias no acreditan funcionamiento en un televisor real. No se modificó la lógica de la aplicación durante esta importación.
