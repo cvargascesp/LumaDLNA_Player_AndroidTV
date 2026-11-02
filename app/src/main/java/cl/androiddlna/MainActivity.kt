@@ -407,7 +407,19 @@ class MainActivity : ComponentActivity() {
         frame.addView(seekPreview, FrameLayout.LayoutParams(-2,-2,Gravity.CENTER))
         val tracks = LinearLayout(this).apply { gravity = Gravity.END }
         tracks.addView(action("Audio") { TrackSelectionDialogBuilder(this, "Audio", p, androidx.media3.common.C.TRACK_TYPE_AUDIO).build().show() })
-        tracks.addView(action("Subtítulos") { TrackSelectionDialogBuilder(this, "Subtítulos", p, androidx.media3.common.C.TRACK_TYPE_TEXT).setShowDisableOption(true).build().show() })
+        fun showSubtitleSelection() {
+            val parameters = p.trackSelectionParameters
+            // Disable the entire text track type, including forced subtitles. The
+            // built-in controller's "None" only changes automatic selection flags.
+            TrackSelectionDialogBuilder(this, "Subtítulos", p, androidx.media3.common.C.TRACK_TYPE_TEXT)
+                .setShowDisableOption(true)
+                .setIsDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT in parameters.disabledTrackTypes)
+                .setOverrides(parameters.overrides)
+                .build().show()
+        }
+        tracks.addView(action("Subtítulos") { showSubtitleSelection() })
+        view.findViewById<View>(androidx.media3.ui.R.id.exo_subtitle)
+            .setOnClickListener { showSubtitleSelection() }
         val audio = tracks.getChildAt(0).apply { id = View.generateViewId() }
         val subtitles = tracks.getChildAt(1).apply { id = View.generateViewId() }
         val playPause = view.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)
