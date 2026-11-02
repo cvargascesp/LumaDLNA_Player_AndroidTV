@@ -229,6 +229,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun cacheKey(s: Server, id: String) = "folder:${s.identity}:$id"
+    private fun lastPlayedKey(s: Server, folderId: String) = "lastPlayed:${s.identity.length}:${s.identity}:$folderId"
     private fun openFolder(id: String, title: String, push: Boolean = true, refresh: Boolean = false) {
         val s = server ?: return
         browsing?.cancel(); if (push) path += id to title
@@ -249,12 +250,14 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun showEntries() {
+        val lastPlayed = server?.let { s -> path.lastOrNull()?.let { prefs.getString(lastPlayedKey(s, it.first), null) } }
+        val resumePosition = entries.indexOfFirst { !it.folder && it.id == lastPlayed }.takeIf { it >= 0 }
         status.text = "${entries.count { it.folder }} carpetas · ${entries.count { !it.folder }} videos" + if (entries.isEmpty()) " · Carpeta vacía o sin videos compatibles" else ""
         displayTiles(entries.map { e -> Tile(e.title, if (e.folder) "Carpeta" else listOf(e.duration.substringBefore('.'), e.resolution, e.mime.removePrefix("video/")).filter { it.isNotBlank() }.joinToString(" · "), e.art, if (e.folder) "▰" else "▶", {
             if (e.folder) openFolder(e.id,e.title) else play(entries.filter { !it.folder }, e)
-        }, if (e.folder) ({ saveShortcut(e.id,e.title) }) else null) })
+        }, if (e.folder) ({ saveShortcut(e.id,e.title) }) else null) }, resumePosition)
     }
-    private fun displayTiles(tiles: List<Tile>) {
+    private fun displayTiles(tiles: List<Tile>, resumePosition: Int? = null) {
         val body = grid
         val old = body.adapter as? Tiles
         val position = currentFocus?.let { body.findContainingViewHolder(it)?.bindingAdapterPosition }
@@ -263,10 +266,11 @@ class MainActivity : ComponentActivity() {
         val adapter = Tiles(tiles)
         body.adapter = adapter
         if (shouldFocus && tiles.isNotEmpty()) {
-            val target = selected?.let { key -> tiles.indexOfFirst { tileKey(it) == key }.takeIf { it >= 0 } } ?: 0
+            val target = selected?.let { key -> tiles.indexOfFirst { tileKey(it) == key }.takeIf { it >= 0 } }
+                ?: resumePosition ?: 0
             body.scrollToPosition(target)
             body.doOnNextLayout {
-                if (body === grid && body.isAttachedToWindow && player == null && !drawerOpen) {
+                if (body === grid && body.adapter === adapter && body.isAttachedToWindow && player == null && !drawerOpen) {
                     body.findViewHolderForAdapterPosition(target)?.itemView?.requestFocus()
                     initialBodyFocus = false
                 }
@@ -373,6 +377,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun play(queue: List<Entry>, selected: Entry) {
         browsing?.cancel()
+        val lastPlayed = lastPlayedKey(requireNotNull(server), path.last().first)
         val p = ExoPlayer.Builder(this).build(); player = p
         val frame = FrameLayout(this)
         val view = PlayerView(this).apply { player = p; controllerShowTimeoutMs = 5000; setShowSubtitleButton(true); setShowNextButton(true); setShowPreviousButton(true); keepScreenOn = true }
@@ -392,7 +397,7 @@ class MainActivity : ComponentActivity() {
             var pointerOver = false
             fun updateScrubber() = setScrubberColor(if (hasFocus() || pointerOver) mint else Color.WHITE)
             updateScrubber()
-            contentDescription = "Posición del video. Izquierda y derecha para buscar; arriba para controles; abajo para audio y subtítulos."
+            contentDescription = "Posición del video. Izquierda y derecha para buscar; abajo para controles de reproducción, audio y subtítulos."
             setOnFocusChangeListener { _, _ -> updateScrubber() }
             setOnHoverListener { _, event ->
                 when (event.actionMasked) {
@@ -423,9 +428,38 @@ class MainActivity : ComponentActivity() {
         val audio = tracks.getChildAt(0).apply { id = View.generateViewId() }
         val subtitles = tracks.getChildAt(1).apply { id = View.generateViewId() }
         val playPause = view.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)
-        timebar.nextFocusUpId = playPause.id
-        timebar.nextFocusDownId = audio.id
-        timebar.nextFocusForwardId = audio.id
+        // Keep the video clear: the scrim belongs only to the footer.
+        view.findViewById<View>(androidx.media3.ui.R.id.exo_controls_background)
+            .setBackgroundColor(Color.TRANSPARENT)
+        val footer = view.findViewById<FrameLayout>(androidx.media3.ui.R.id.exo_bottom_bar)
+        footer.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(Color.TRANSPARENT, 0xcc000000.toInt()))
+        val playbackControls = view.findViewById<LinearLayout>(androidx.media3.ui.R.id.exo_center_controls)
+        (playbackControls.parent as ViewGroup).removeView(playbackControls)
+        playbackControls.setPadding(0, 0, 0, 0)
+        for (index in 0 until playbackControls.childCount) {
+            playbackControls.getChildAt(index).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
+                if (id == androidx.media3.ui.R.id.exo_rew_with_amount ||
+                    id == androidx.media3.ui.R.id.exo_ffwd_with_amount) {
+                    // These buttons draw the arrow as a foreground and the amount
+                    // as text. Scale the original text inset with the icon size.
+                    val iconScale = dp(40).toFloat() /
+                        resources.getDimension(androidx.media3.ui.R.dimen.exo_icon_size)
+                    val amountInset = (resources.getDimension(
+                        androidx.media3.ui.R.dimen.exo_icon_padding_bottom) * iconScale).toInt()
+                    setPadding(0, 0, 0, amountInset)
+                    (this as TextView).setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
+                        resources.getDimension(androidx.media3.ui.R.dimen.exo_icon_text_size) * iconScale)
+                } else {
+                    setPadding(dp(7), dp(7), dp(7), dp(7))
+                }
+            }
+        }
+        footer.addView(playbackControls, FrameLayout.LayoutParams(-2, dp(48), Gravity.CENTER))
+        timebar.nextFocusUpId = timebar.id
+        timebar.nextFocusDownId = playPause.id
+        timebar.nextFocusForwardId = playPause.id
         audio.nextFocusLeftId = audio.id
         audio.nextFocusRightId = subtitles.id
         audio.nextFocusForwardId = subtitles.id
@@ -436,10 +470,14 @@ class MainActivity : ComponentActivity() {
             control.nextFocusUpId = timebar.id
             control.nextFocusDownId = control.id
         }
-        view.findViewById<ViewGroup>(androidx.media3.ui.R.id.exo_center_controls)
-            .getFocusables(View.FOCUS_FORWARD).forEach { control ->
-                control.nextFocusDownId = timebar.id
-            }
+        val playbackButtons = playbackControls.getFocusables(View.FOCUS_FORWARD)
+        playbackButtons.forEachIndexed { index, control ->
+            control.nextFocusUpId = timebar.id
+            control.nextFocusDownId = control.id
+            control.nextFocusLeftId = playbackButtons.getOrNull(index - 1)?.id ?: control.id
+            control.nextFocusRightId = playbackButtons.getOrNull(index + 1)?.id ?: audio.id
+        }
+        audio.nextFocusLeftId = playbackButtons.last().id
         view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
             tracks.visibility = visibility
             controlsHideJob?.cancel()
@@ -457,6 +495,11 @@ class MainActivity : ComponentActivity() {
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 finishSeek(false)
+                if (mediaItem != null) {
+                    queue.getOrNull(p.currentMediaItemIndex)?.let { episode ->
+                        prefs.edit().putString(lastPlayed, episode.id).apply()
+                    }
+                }
                 if (mediaItem != null && reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
                     p.seekTo(prefs.getLong(mediaItem.mediaId, 0L))
                 }
