@@ -131,7 +131,10 @@ object Dlna {
                 "container", "item" -> { e = Entry(p.getAttributeValue(null, "id") ?: "", "", p.name == "container"); kind = "" }
                 "title" -> { val s = p.nextText(); e = e?.copy(title = s) }
                 "class" -> kind = p.nextText()
-                "albumArtURI" -> { val s = p.nextText(); e = e?.copy(art = resolve(s)) }
+                "albumArtURI" -> {
+                    val art = p.nextText().trim()
+                    if (art.isNotEmpty()) e = e?.copy(art = resolve(art))
+                }
                 "res" -> {
                     val protocol = p.getAttributeValue(null, "protocolInfo").orEmpty()
                     val duration = p.getAttributeValue(null, "duration").orEmpty(); val resolution = p.getAttributeValue(null, "resolution").orEmpty(); val size = p.getAttributeValue(null, "size").orEmpty()

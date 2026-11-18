@@ -19,14 +19,19 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerControlView
-import androidx.media3.ui.TrackSelectionDialogBuilder
+import androidx.media3.ui.TrackSelectionView
+import androidx.media3.common.C
+import android.app.AlertDialog
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.core.view.doOnNextLayout
+import androidx.core.view.doOnPreDraw
 import coil.load
 import kotlinx.coroutines.*
 import org.json.JSONArray
@@ -375,10 +380,46 @@ class MainActivity : ComponentActivity() {
         prefs.edit().putString("shortcuts", remaining.toString()).apply()
         Toast.makeText(this, "Acceso eliminado", Toast.LENGTH_SHORT).show()
     }
+    private fun showTrackSelection(player: Player, title: String, trackType: Int) {
+        val parameters = player.trackSelectionParameters
+        val tracks = TrackSelectionView(this)
+        tracks.setShowDisableOption(trackType == C.TRACK_TYPE_TEXT)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(ScrollView(this).apply { addView(tracks) })
+            .create()
+        tracks.init(
+            player.currentTracks.groups.filter { it.type == trackType },
+            trackType in parameters.disabledTrackTypes,
+            parameters.overrides,
+            null
+        ) { disabled, overrides ->
+            val updated = player.trackSelectionParameters.buildUpon()
+                .clearOverridesOfType(trackType)
+                .setTrackTypeDisabled(trackType, disabled)
+            overrides.values.forEach { updated.addOverride(it) }
+            player.trackSelectionParameters = updated.build()
+            dialog.dismiss()
+        }
+        dialog.show()
+    }
+
     private fun play(queue: List<Entry>, selected: Entry) {
         browsing?.cancel()
         val lastPlayed = lastPlayedKey(requireNotNull(server), path.last().first)
-        val p = ExoPlayer.Builder(this).build(); player = p
+        val renderers = DefaultRenderersFactory(this)
+            .forceEnableMediaCodecAsynchronousQueueing()
+            .setEnableDecoderFallback(true)
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15_000, 50_000, 2_500, 5_000)
+            .build()
+        val p = ExoPlayer.Builder(this, renderers)
+            .setLoadControl(loadControl)
+            .build()
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            p.setVideoChangeFrameRateStrategy(android.view.Surface.CHANGE_FRAME_RATE_ALWAYS)
+        }
+        player = p
         val frame = FrameLayout(this)
         val view = PlayerView(this).apply { player = p; controllerShowTimeoutMs = 5000; setShowSubtitleButton(true); setShowNextButton(true); setShowPreviousButton(true); keepScreenOn = true }
         playerView = view; frame.addView(view, FrameLayout.LayoutParams(-1,-1))
@@ -392,6 +433,7 @@ class MainActivity : ComponentActivity() {
         timebar.apply {
             isFocusable = true
             isFocusableInTouchMode = true
+            isFocusedByDefault = true
             setPlayedColor(Color.WHITE)
             background = null
             var pointerOver = false
@@ -411,16 +453,9 @@ class MainActivity : ComponentActivity() {
         seekPreview = label("", 26f).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(16), dp(24), dp(16)); background = background(Color.rgb(18,29,47)); visibility = View.GONE }
         frame.addView(seekPreview, FrameLayout.LayoutParams(-2,-2,Gravity.CENTER))
         val tracks = LinearLayout(this).apply { gravity = Gravity.END }
-        tracks.addView(action("Audio") { TrackSelectionDialogBuilder(this, "Audio", p, androidx.media3.common.C.TRACK_TYPE_AUDIO).build().show() })
+        tracks.addView(action("Audio") { showTrackSelection(p, "Audio", C.TRACK_TYPE_AUDIO) })
         fun showSubtitleSelection() {
-            val parameters = p.trackSelectionParameters
-            // Disable the entire text track type, including forced subtitles. The
-            // built-in controller's "None" only changes automatic selection flags.
-            TrackSelectionDialogBuilder(this, "Subtítulos", p, androidx.media3.common.C.TRACK_TYPE_TEXT)
-                .setShowDisableOption(true)
-                .setIsDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT in parameters.disabledTrackTypes)
-                .setOverrides(parameters.overrides)
-                .build().show()
+            showTrackSelection(p, "Subtítulos", C.TRACK_TYPE_TEXT)
         }
         tracks.addView(action("Subtítulos") { showSubtitleSelection() })
         view.findViewById<View>(androidx.media3.ui.R.id.exo_subtitle)
@@ -428,12 +463,24 @@ class MainActivity : ComponentActivity() {
         val audio = tracks.getChildAt(0).apply { id = View.generateViewId() }
         val subtitles = tracks.getChildAt(1).apply { id = View.generateViewId() }
         val playPause = view.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)
-        // Keep the video clear: the scrim belongs only to the footer.
+        // Keep the center of the video clear between the two gradient panels.
         view.findViewById<View>(androidx.media3.ui.R.id.exo_controls_background)
             .setBackgroundColor(Color.TRANSPARENT)
         val footer = view.findViewById<FrameLayout>(androidx.media3.ui.R.id.exo_bottom_bar)
-        footer.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(Color.TRANSPARENT, 0xcc000000.toInt()))
+        val footerFocusability = footer.descendantFocusability
+        footer.visibility = View.INVISIBLE
+        val panelColors = intArrayOf(Color.TRANSPARENT, 0xcc000000.toInt())
+        footer.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, panelColors)
+        val fileTitle = label(selected.title, 20f).apply {
+            setTextColor(Color.WHITE)
+            setSingleLine()
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(16), dp(12), dp(16), dp(18))
+            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, panelColors)
+            visibility = View.INVISIBLE
+        }
+        view.findViewById<PlayerControlView>(androidx.media3.ui.R.id.exo_controller)
+            .addView(fileTitle, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
         val playbackControls = view.findViewById<LinearLayout>(androidx.media3.ui.R.id.exo_center_controls)
         (playbackControls.parent as ViewGroup).removeView(playbackControls)
         playbackControls.setPadding(0, 0, 0, 0)
@@ -478,15 +525,43 @@ class MainActivity : ComponentActivity() {
             control.nextFocusRightId = playbackButtons.getOrNull(index + 1)?.id ?: audio.id
         }
         audio.nextFocusLeftId = playbackButtons.last().id
+        var timebarFocusPending = false
+        var waitingForFirstFrame = true
+        fun focusTimebarAfterShowingControls() {
+            if (timebarFocusPending) return
+            timebarFocusPending = true
+            // Media3 requests Play/Pause focus immediately after its visibility callback.
+            footer.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            view.doOnPreDraw {
+                timebarFocusPending = false
+                if (playerView === view && timebar.isShown) timebar.requestFocus()
+                if (!waitingForFirstFrame && footer.visibility != View.VISIBLE) {
+                    footer.visibility = View.VISIBLE
+                    fileTitle.visibility = View.VISIBLE
+                    resetControlsTimeout()
+                }
+                footer.descendantFocusability = footerFocusability
+            }
+        }
         view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
             tracks.visibility = visibility
             controlsHideJob?.cancel()
-            if (visibility == View.VISIBLE) resetControlsTimeout()
-            if (visibility == View.VISIBLE) timebar.requestFocus()
+            if (visibility == View.VISIBLE) {
+                resetControlsTimeout()
+                focusTimebarAfterShowingControls()
+            }
         })
+        focusTimebarAfterShowingControls()
         setContentView(frame)
         session = MediaSession.Builder(this,p).build()
         p.addListener(object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                if (!waitingForFirstFrame) return
+                waitingForFirstFrame = false
+                view.showController()
+                focusTimebarAfterShowingControls()
+            }
+
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
                 val oldItem = oldPosition.mediaItem ?: return
                 val changed = oldPosition.mediaItemIndex != newPosition.mediaItemIndex
@@ -497,6 +572,7 @@ class MainActivity : ComponentActivity() {
                 finishSeek(false)
                 if (mediaItem != null) {
                     queue.getOrNull(p.currentMediaItemIndex)?.let { episode ->
+                        fileTitle.text = episode.title
                         prefs.edit().putString(lastPlayed, episode.id).apply()
                     }
                 }
@@ -510,14 +586,16 @@ class MainActivity : ComponentActivity() {
             override fun onIsPlayingChanged(isPlaying: Boolean) { saveCurrentProgress() }
             override fun onPlayerError(error: PlaybackException) {
                 saveCurrentProgress()
+                waitingForFirstFrame = false
                 Toast.makeText(this@MainActivity, "No se pudo reproducir. OK en reproducir para reintentar; Siguiente para continuar.", Toast.LENGTH_LONG).show(); view.showController()
+                focusTimebarAfterShowingControls()
             }
         })
         val serverId = requireNotNull(server).identity
         fun progressKey(e: Entry) = "progress:${serverId.length}:$serverId:${e.id}"
         p.setMediaItems(queue.map { e -> MediaItem.Builder().setMediaId(progressKey(e)).setUri(e.url).setMediaMetadata(MediaMetadata.Builder().setTitle(e.title).build()).build() }, queue.indexOf(selected), prefs.getLong(progressKey(selected), 0L))
         p.repeatMode = Player.REPEAT_MODE_ALL
-        p.prepare(); p.play(); view.showController(); timebar.requestFocus()
+        p.prepare(); p.play(); view.showController()
         progressJob = lifecycleScope.launch {
             while (isActive) { delay(1000); saveCurrentProgress() }
         }
